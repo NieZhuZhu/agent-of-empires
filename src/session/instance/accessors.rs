@@ -1216,7 +1216,7 @@ replies = true
                             manifest.as_bytes(),
                         ),
                         capabilities: vec!["session.integration".into()],
-                        granted_at: chrono::Utc::now(),
+                        granted_at: crate::time::Timestamp::now(),
                     }),
                     ..Default::default()
                 },
