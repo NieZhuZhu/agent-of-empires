@@ -1,15 +1,14 @@
 import { useCallback, useMemo, useRef, useState } from "react";
-import { usePluginUiEntries } from "../lib/pluginUiContext";
+import { usePluginAttention, usePluginUiEntries } from "../lib/pluginUiContext";
 import { pluginSortSpecs } from "../lib/pluginUi";
 import type { ProjectInfo, RepoGroup, Workspace } from "../lib/types";
 import type { RuntimeCursor, SessionMutation } from "../lib/api";
 import type { TrashRecoveryTarget } from "../lib/trashActions";
 import { SidebarSystemHealth } from "./SystemHealthStrip";
-import { axisDrawsRepoHeaders, type SidebarAxis } from "../lib/sidebarAxis";
+import type { SidebarGroupBy, SidebarSort } from "../lib/sidebarView";
 import {
   archivableWorkspaces,
   type NestedSidebarGroup,
-  type OrgNestedGroup,
   type SidebarGroup,
   type SidebarWorkspaceView,
 } from "../lib/sidebarGroups";
@@ -18,7 +17,7 @@ import { SidebarCompactContext } from "../lib/sidebarCompact";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { TOUR_ANCHORS, tourAnchor } from "../lib/tourSteps";
 import { useServerDown } from "../lib/connectionState";
-import type { SidebarSortMode } from "../lib/sidebarSort";
+import { workspaceAttentionCount } from "../lib/sidebarSort";
 import { useSidebarTriage } from "../hooks/useSidebarTriage";
 import { sessionWorkspaces } from "../lib/sessionWorkspace";
 import { ProjectsSection } from "./ProjectsSection";
@@ -29,14 +28,12 @@ import { newDragClickGuard, useSuppressClickAfterDrag, type DragClickGuard } fro
 import {
   filterFlat,
   filterNested,
-  filterOrg,
   makeRowFilter,
   renderedOrder,
   sunkViews,
-  visibleOrgRepos,
   visibleSubgroups,
 } from "./sidebar/filterGroups";
-import { FlatGroupList, NestedGroupList, OrgGroupList, type ListContext } from "./sidebar/GroupLists";
+import { FlatGroupList, NestedGroupList, type DragOptions, type ListContext } from "./sidebar/GroupLists";
 import { SessionRow } from "./sidebar/SessionRow";
 import { FacetPanel, SidebarToolbar } from "./sidebar/SidebarToolbar";
 import { TrashMenu } from "./sidebar/TrashMenu";
@@ -52,22 +49,25 @@ interface Props {
   observedById: Record<string, RuntimeCursor>;
   runtimeEpoch: string | null;
   onSessionMutation: (mutation: SessionMutation) => void;
+  groupBy: SidebarGroupBy;
+  sort: SidebarSort;
+  onGroupByChange: (groupBy: SidebarGroupBy) => void;
+  onSortChange: (sort: SidebarSort) => void;
+  onResetCustomOrder: () => void;
+  /** My groups. */
   groups: SidebarGroup[];
-  /** Used only when `axis === "repo+group"`. */
+  /** Repository. */
   nestedGroups: NestedSidebarGroup[];
-  /** Used only when `axis === "org"`. */
-  orgGroups: OrgNestedGroup[];
   /** Workspaces whose every session is trashed, computed by the parent from the unsliced list. */
   trashedWorkspaces?: Workspace[];
   /** Trashed sessions the daemon holds; the rows load on demand, so this keeps the Trash control visible before then. */
   trashedCount?: number;
   trashLoaded?: boolean;
   onLoadTrash?: () => void;
+  onToggleRepo: (repoId: string) => void;
   onToggleSubgroup: (repoId: string, groupPath: string) => void;
-  onToggleOrg: (orgId: string) => void;
-  onToggleOrgRepo: (orgId: string, repoId: string) => void;
-  onReorderWorkspaces: (newOrder: string[]) => void;
-  onReorderGroups: (orderedGroupIds: string[]) => void;
+  onMoveWorkspace: DragOptions["onMoveWorkspace"];
+  onMoveRepository: DragOptions["onMoveRepository"];
   activeId: string | null;
   /** The session the URL currently points at; lets an expanded sibling row tell it apart from the rest of its group. */
   activeSessionId: string | null;
@@ -100,26 +100,12 @@ interface Props {
   readOnly?: boolean;
   /** False in CityHall client mode, which hides project management. */
   canManageProjects?: boolean;
-  sortMode: SidebarSortMode;
-  onSortModeChange: (mode: SidebarSortMode) => void;
   pluginSortRef: { pluginId: string; entryId: string } | null;
   onPluginSortChange: (ref: { pluginId: string; entryId: string }) => void;
-  axis: SidebarAxis;
-  onAxisChange: (axis: SidebarAxis) => void;
 }
 
 export function WorkspaceSidebar(props: Props) {
-  const {
-    groups,
-    nestedGroups,
-    orgGroups,
-    trashedWorkspaces = [],
-    activeId,
-    activeSessionId,
-    open,
-    readOnly,
-    axis,
-  } = props;
+  const { groups, nestedGroups, trashedWorkspaces = [], activeId, activeSessionId, open, readOnly, groupBy } = props;
   const { settings: webSettings, update: updateWebSettings } = useWebSettings();
   const rightSide = webSettings.sidebarSide === "right";
   // Only the in-flow sidebar has the handle that leaves the rail, so the phone drawer ignores a saved rail.
@@ -140,78 +126,53 @@ export function WorkspaceSidebar(props: Props) {
     props.pluginSortRef != null &&
     pluginSorts.some((s) => s.pluginId === props.pluginSortRef!.pluginId && s.entryId === props.pluginSortRef!.entryId);
 
-  // Reorder rebuilds order from the full list, so it is off whenever the visible order is computed or filtered,
-  // and on axes (the user-group axis) whose groups cannot persist an order.
-  const reorderDisabled =
-    !!readOnly ||
-    props.sortMode === "lastActivity" ||
-    pluginSortActive ||
-    facets.activeFacets.length > 0 ||
-    groups.some((g) => !g.capabilities.reorder);
   const dragClickGuard = useRef<DragClickGuard>(newDragClickGuard());
   useSuppressClickAfterDrag(dragClickGuard);
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [filterQuery, setFilterQuery] = useState("");
   const [facetOpen, setFacetOpen] = useState(false);
+  // A momentary triage view of this browser, so it is in memory only and clears with the filter panel.
+  const [needsYou, setNeedsYou] = useState(false);
+  const pluginAttention = usePluginAttention();
   const filterRef = useRef<HTMLInputElement>(null);
   const [sunkExpanded, toggleSunkExpanded] = usePersistedFlag("aoe-sidebar-sunk-expanded", false);
   // The compact rail has no filter controls, so a query typed earlier stops applying without being cleared.
   const activeFilterQuery = compact ? "" : filterQuery;
+  const activeNeedsYou = needsYou && !compact;
   const q = activeFilterQuery.trim().toLowerCase();
-  const hasFilter = !!q || facets.activeFacets.length > 0;
+  const hasFilter = !!q || facets.activeFacets.length > 0 || activeNeedsYou;
 
   const { matchesFacets } = facets;
-  const [filteredGroups, filteredNested, filteredOrgGroups] = useMemo(() => {
-    if (!hasFilter) return [groups, nestedGroups, orgGroups] as const;
-    const keep = makeRowFilter(q, matchesFacets);
-    return [filterFlat(groups, keep), filterNested(nestedGroups, keep), filterOrg(orgGroups, keep)] as const;
-  }, [hasFilter, q, matchesFacets, groups, nestedGroups, orgGroups]);
-  const isNested = axis === "repo+group";
-  const isOrgAxis = axis === "org";
+  const [filteredGroups, filteredNested] = useMemo(() => {
+    if (!hasFilter) return [groups, nestedGroups] as const;
+    const needs = activeNeedsYou ? (ws: Workspace) => workspaceAttentionCount(ws, pluginAttention) > 0 : undefined;
+    const keep = makeRowFilter(q, matchesFacets, needs);
+    return [filterFlat(groups, keep), filterNested(nestedGroups, keep)] as const;
+  }, [hasFilter, activeNeedsYou, pluginAttention, q, matchesFacets, groups, nestedGroups]);
+  const isNested = groupBy === "project";
 
   // An expanded sibling keeps its own optimistic override, which has to reconcile against its one session,
-  // also after its siblings are gone. The status axis repeats a workspace per bucket, so the records come
-  // from every slice of every axis plus their session children.
+  // also after its siblings are gone. My groups repeats a workspace per Group, so the records come from every
+  // slice of both groupings plus their session children.
   const triageWorkspaces = useMemo(() => {
-    const slices = [groups, ...nestedGroups.map((n) => n.subgroups), ...orgGroups.map((o) => o.repos)]
+    const slices = [groups, ...nestedGroups.map((n) => n.subgroups)]
       .flat()
       .flatMap((g) => g.workspaces.map((v) => v.workspace));
     return [...slices, ...sessionWorkspaces(slices)];
-  }, [groups, nestedGroups, orgGroups]);
+  }, [groups, nestedGroups]);
   const triage = useSidebarTriage(triageWorkspaces);
-  // Rows, not workspaces: the status axis renders a workspace once per bucket, and each row's
-  // actions belong to its own session. Filtering keeps the selection, so ranges use `filtered`.
+  // Rows, not workspaces: My groups renders a workspace once per Group, and each row's actions belong to its
+  // own session. Filtering keeps the selection, so ranges use `filtered`.
   const [orderedIds, rows] = useMemo(() => {
-    const filteredAll = isNested
-      ? filteredNested.flatMap((ng) => ng.subgroups)
-      : isOrgAxis
-        ? filteredOrgGroups.flatMap((og) => og.repos)
-        : filteredGroups;
-    // A collapsed repo or org hides its children, so a range must skip the rows it hides.
-    const rendered = isNested
-      ? visibleSubgroups(filteredNested, hasFilter)
-      : isOrgAxis
-        ? visibleOrgRepos(filteredOrgGroups, hasFilter)
-        : filteredGroups;
-    const every = isNested
-      ? nestedGroups.flatMap((ng) => ng.subgroups)
-      : isOrgAxis
-        ? orgGroups.flatMap((og) => og.repos)
-        : groups;
-    return [renderedOrder(rendered, hasFilter, sunkExpanded, filteredAll), every.flatMap((g) => g.workspaces)] as const;
-  }, [
-    isNested,
-    isOrgAxis,
-    groups,
-    nestedGroups,
-    orgGroups,
-    filteredGroups,
-    filteredNested,
-    filteredOrgGroups,
-    hasFilter,
-    sunkExpanded,
-  ]);
+    const filteredAll = isNested ? filteredNested.flatMap((ng) => ng.subgroups) : filteredGroups;
+    // A collapsed repo hides its children, so a range must skip the rows it hides.
+    const rendered = isNested ? visibleSubgroups(filteredNested, hasFilter) : filteredGroups;
+    const every = isNested ? nestedGroups.flatMap((ng) => ng.subgroups) : groups;
+    // Needs you hides the footer.
+    const footer = sunkExpanded && !activeNeedsYou;
+    return [renderedOrder(rendered, hasFilter, footer, filteredAll), every.flatMap((g) => g.workspaces)] as const;
+  }, [isNested, groups, nestedGroups, filteredGroups, filteredNested, hasFilter, sunkExpanded, activeNeedsYou]);
   const selection = useSidebarSelection({
     rows,
     orderedIds,
@@ -284,19 +245,28 @@ export function WorkspaceSidebar(props: Props) {
     !!q &&
     props.savedProjects.some((p) => p.displayName.toLowerCase().includes(q) || p.repoPath.toLowerCase().includes(q));
   const hasResults =
-    (isNested ? filteredNested.length : isOrgAxis ? filteredOrgGroups.length : filteredGroups.length) > 0 ||
-    savedProjectsMatchQuery;
-  const sunk = sunkViews(
-    isNested
-      ? filteredNested.flatMap((ng) => ng.subgroups)
-      : isOrgAxis
-        ? filteredOrgGroups.flatMap((og) => og.repos)
-        : filteredGroups,
-  );
+    (isNested ? filteredNested.length : filteredGroups.length) > 0 || (savedProjectsMatchQuery && !activeNeedsYou);
+  const sunk = activeNeedsYou
+    ? []
+    : sunkViews(isNested ? filteredNested.flatMap((ng) => ng.subgroups) : filteredGroups);
+
+  // Rows reorder within their header and headers among themselves, but not while a plugin sort or facet decides
+  // which rows show. A header drag also waits for any filter, which hides headers.
+  const rowsDisabled = !!readOnly || pluginSortActive || facets.activeFacets.length > 0;
+  const drag: DragOptions = {
+    rowsDisabled,
+    headersDisabled: rowsDisabled || hasFilter,
+    onMoveWorkspace: props.onMoveWorkspace,
+    onMoveRepository: props.onMoveRepository,
+    dragClickGuard,
+  };
 
   const toggleFilter = () => {
     setFilterOpen((o) => {
-      if (o) setFilterQuery("");
+      if (o) {
+        setFilterQuery("");
+        setNeedsYou(false);
+      }
       return !o;
     });
     if (!filterOpen) requestAnimationFrame(() => filterRef.current?.focus());
@@ -325,10 +295,12 @@ export function WorkspaceSidebar(props: Props) {
       >
         <SidebarToolbar
           compact={compact}
-          axis={axis}
-          onAxisChange={props.onAxisChange}
-          sortMode={props.sortMode}
-          onSortModeChange={props.onSortModeChange}
+          groupBy={groupBy}
+          sort={props.sort}
+          onGroupByChange={props.onGroupByChange}
+          onSortChange={props.onSortChange}
+          onResetCustomOrder={props.onResetCustomOrder}
+          readOnly={readOnly}
           pluginSorts={pluginSorts}
           pluginSortRef={props.pluginSortRef}
           onPluginSortChange={props.onPluginSortChange}
@@ -337,6 +309,7 @@ export function WorkspaceSidebar(props: Props) {
           facetOpen={facetOpen}
           onToggleFacets={() => setFacetOpen((o) => !o)}
           filterOpen={filterOpen}
+          filterActive={activeNeedsYou}
           onToggleFilter={toggleFilter}
           offline={offline}
           onNew={() => props.onNew()}
@@ -344,7 +317,7 @@ export function WorkspaceSidebar(props: Props) {
         />
 
         {filterOpen && !compact && (
-          <div className="px-3 pb-2">
+          <div className="px-3 pb-2 flex items-center gap-1.5">
             <input
               ref={filterRef}
               type="text"
@@ -355,8 +328,22 @@ export function WorkspaceSidebar(props: Props) {
               }}
               placeholder="Filter by name, branch, agent..."
               data-testid="sidebar-filter-input"
-              className="w-full bg-surface-800 border border-surface-700 rounded-md px-2.5 py-1.5 text-[13px] text-text-primary placeholder:text-text-dim focus:border-brand-600 focus:outline-none"
+              className="min-w-0 flex-1 bg-surface-800 border border-surface-700 rounded-md px-2.5 py-1.5 text-[13px] text-text-primary placeholder:text-text-dim focus:border-brand-600 focus:outline-none"
             />
+            <button
+              type="button"
+              aria-pressed={needsYou}
+              onClick={() => setNeedsYou((v) => !v)}
+              data-testid="sidebar-filter-needs-you"
+              title="Show only sessions that need you"
+              className={`shrink-0 h-8 px-2 rounded-md border text-[12px] cursor-pointer transition-colors ${
+                needsYou
+                  ? "border-brand-600 bg-brand-500/15 text-brand-500"
+                  : "border-surface-700 text-text-secondary hover:text-text-primary hover:bg-surface-700/40"
+              }`}
+            >
+              Needs you
+            </button>
           </div>
         )}
 
@@ -374,28 +361,17 @@ export function WorkspaceSidebar(props: Props) {
               ctx={ctx}
               groups={filteredNested}
               fullGroups={nestedGroups}
-              onToggleGroup={props.onToggleGroup}
+              drag={drag}
+              onToggleRepo={props.onToggleRepo}
               onToggleSubgroup={props.onToggleSubgroup}
-            />
-          ) : isOrgAxis ? (
-            <OrgGroupList
-              ctx={ctx}
-              groups={filteredOrgGroups}
-              fullGroups={orgGroups}
-              onToggleOrg={props.onToggleOrg}
-              onToggleOrgRepo={props.onToggleOrgRepo}
             />
           ) : (
             <FlatGroupList
               ctx={ctx}
               groups={filteredGroups}
               fullGroups={groups}
-              reorderDisabled={reorderDisabled}
-              groupDragDisabled={reorderDisabled || q.length > 0}
+              drag={drag}
               onToggleGroup={props.onToggleGroup}
-              onReorderGroups={props.onReorderGroups}
-              onReorderWorkspaces={props.onReorderWorkspaces}
-              dragClickGuard={dragClickGuard}
             />
           )}
 
@@ -425,10 +401,10 @@ export function WorkspaceSidebar(props: Props) {
             </div>
           )}
 
-          {(props.canManageProjects ?? true) && (
+          {(props.canManageProjects ?? true) && !activeNeedsYou && (
             <ProjectsSection
               projects={props.savedProjects}
-              drawsRepoHeaders={axisDrawsRepoHeaders(axis)}
+              drawsRepoHeaders={isNested}
               query={q}
               readOnly={readOnly}
               offline={offline}
@@ -441,7 +417,9 @@ export function WorkspaceSidebar(props: Props) {
 
           {!hasResults && hasFilter && (
             <div className="px-4 py-8 text-center">
-              <p className="text-sm text-text-muted">No matches for &ldquo;{activeFilterQuery}&rdquo;</p>
+              <p className="text-sm text-text-muted">
+                {activeFilterQuery.trim() ? <>No matches for &ldquo;{activeFilterQuery}&rdquo;</> : "Nothing needs you"}
+              </p>
             </div>
           )}
 

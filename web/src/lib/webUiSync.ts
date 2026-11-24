@@ -7,10 +7,7 @@ import { markWebUiStateHydrated } from "./webUiHydration";
 
 const EXACT_KEYS = new Set<string>([
   "aoe.acp.toolDensity.v1", // compact/detailed tool display
-  "aoe-sidebar-sort-mode",
-  "aoe-sidebar-axis",
   "aoe-sidebar-sunk-expanded",
-  "aoe-repo-group-order-v1", // manual repo-group order
   "aoe-acp-last-tool", // last agent picked in the wizard
   "aoe-last-browse-dir", // last dir browsed (paths are identical across devices)
   "aoe-web-settings", // dashboard prefs (persistent terminals, auto-open keyboard, fonts)
@@ -21,7 +18,6 @@ const KEY_PREFIXES = [
   "aoe-repo-collapsed-",
   "aoe-nested-group-collapsed-",
   "aoe-group-collapsed-",
-  "aoe-status-collapsed-",
   SETTINGS_INTRO_KEY_PREFIX,
 ];
 
