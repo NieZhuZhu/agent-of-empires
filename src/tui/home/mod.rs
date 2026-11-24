@@ -182,11 +182,6 @@ pub(super) enum NamespaceIntent {
     ProfileDeleted(String),
     ReorderSession {
         id: String,
-        profile: String,
-        source_group: String,
-        delta: isize,
-        crossing: bool,
-        continuation_destination: Option<String>,
     },
     ReorderGroup,
 }
@@ -295,6 +290,8 @@ pub struct HomeView {
     /// The runtime publishes a merged view of it (unknown workspaces
     /// appended), so this is what detects a peer's reorder.
     observed_workspace_ordering: Vec<String>,
+    /// Repository paths in the shared Custom order of the Repository headers.
+    repository_order: Vec<String>,
     /// The Daemon's grouping and sort as of the last applied snapshot.
     observed_sidebar_view: Option<crate::session::config::SidebarView>,
     session_feed_reload_retry_at: Option<std::time::Instant>,

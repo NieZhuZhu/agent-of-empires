@@ -48,7 +48,8 @@ pub use wire::{
     StopAuxiliaryBody, TerminalSize, TerminalTarget, TerminalTargetStatus, TrashOutcome,
     TrashRelocationOutcome, TrashSessionBody, Tristate, UpdateArchiveBody, UpdateDiffBaseBody,
     UpdateFavoriteBody, UpdateGroupBody, UpdateIgnoredBody, UpdateNotificationsBody, UpdatePinBody,
-    UpdateSnoozeBody, UpdateUnreadBody, WorkspaceRepoSummary, WorktreeEditOutcome,
+    UpdateSnoozeBody, UpdateUnreadBody, WorkspaceOrderingPatch, WorkspaceRepoSummary,
+    WorktreeEditOutcome,
 };
 pub use wire::{
     ApplyUpdateBody, InstallPreviewBody, PluginJob, PluginJobAccepted, PluginJobKind, PluginJobLog,
@@ -947,6 +948,20 @@ impl DaemonClient {
             .join("sidebar-view")
             .map_err(|_| DaemonClientError::Transport)?;
         self.request_mutation(self.http.patch(url).json(body), epoch)
+            .await
+    }
+
+    /// Replace the shared Custom order of rows, of Repository headers, or both.
+    pub async fn set_workspace_ordering(
+        &self,
+        body: &WorkspaceOrderingPatch,
+        epoch: &str,
+    ) -> Result<RuntimeCursor, DaemonClientError> {
+        let url = self
+            .sessions_url
+            .join("workspace-ordering")
+            .map_err(|_| DaemonClientError::Transport)?;
+        self.request_mutation(self.http.put(url).json(body), epoch)
             .await
     }
 
