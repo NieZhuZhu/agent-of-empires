@@ -74,6 +74,7 @@ mod v062_plugin_staging_evidence;
 mod v063_retire_color_labels;
 mod v064_shared_sidebar_view;
 mod v065_shared_custom_order;
+mod v066_favorite_to_pin;
 
 /// Fixtures shared by migrations that rewrite agent hook files.
 #[cfg(test)]
@@ -114,7 +115,7 @@ use anyhow::{Context, Result};
 use std::fs;
 use tracing::{debug, info};
 
-const CURRENT_VERSION: u32 = 65;
+const CURRENT_VERSION: u32 = 66;
 const VERSION_FILE: &str = ".schema_version";
 
 /// Version, log name, and the one-time transformation to run.
@@ -334,6 +335,7 @@ const MIGRATIONS: &[Migration] = &[
     (63, "retire_color_labels", v063_retire_color_labels::run),
     (64, "shared_sidebar_view", v064_shared_sidebar_view::run),
     (65, "shared_custom_order", v065_shared_custom_order::run),
+    (66, "favorite_to_pin", v066_favorite_to_pin::run),
 ];
 
 /// The data-schema version this build targets, i.e. the version every install
