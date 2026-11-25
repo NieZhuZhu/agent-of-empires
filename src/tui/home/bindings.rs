@@ -7,7 +7,7 @@
 //! on top, so a binding can no longer drift between those surfaces.
 //!
 //! Pure navigation keys (arrows, `j`/`k`/`h`/`l`, Home/End, PageUp/Down,
-//! `{`/`}`, `<`/`>`, Enter, Tab) are NOT here: they never relocate between
+//! `{`/`}`, `<`/`>`) are NOT here: they never relocate between
 //! modes and were never the source of the strict-mode bugs. They stay as
 //! explicit arms in `dispatch_action_key`, tried after this table.
 //!
@@ -112,6 +112,11 @@ pub enum ActionId {
     /// Scroll the preview back or forward a page.
     PreviewScrollUp,
     PreviewScrollDown,
+    /// Open the selected session the way `default_attach_mode` says, or toggle the
+    /// group under the cursor.
+    Activate,
+    /// Whichever of live-send and tmux attach [`ActionId::Activate`] does not do.
+    ActivateAlt,
 }
 
 impl ActionId {
@@ -215,6 +220,15 @@ const fn ctrl(c: char) -> Chord {
 const fn f(n: u8) -> Chord {
     Chord {
         code: KeyCode::F(n),
+        ctrl: false,
+        alt: false,
+        shift: false,
+    }
+}
+
+const fn code(code: KeyCode) -> Chord {
+    Chord {
+        code,
         ctrl: false,
         alt: false,
         shift: false,
@@ -1411,6 +1425,23 @@ pub static BINDINGS: &[Binding] = &[
             group: PaletteGroup::Actions,
         }),
     },
+    // Help lists these first itself, since their descriptions follow the attach mode.
+    Binding {
+        id: ActionId::Activate,
+        non_strict: &[code(KeyCode::Enter)],
+        strict: &[code(KeyCode::Enter)],
+        context: Context::Always,
+        help: None,
+        palette: None,
+    },
+    Binding {
+        id: ActionId::ActivateAlt,
+        non_strict: &[code(KeyCode::Tab)],
+        strict: &[code(KeyCode::Tab)],
+        context: Context::Always,
+        help: None,
+        palette: None,
+    },
 ];
 
 /// Stable palette/test id for an action (matches the legacy `builtin_commands`
@@ -1473,6 +1504,8 @@ pub fn palette_id(id: ActionId) -> &'static str {
         ActionId::DismissUpdateBanner => "dismiss-update-banner",
         ActionId::PreviewScrollUp => "preview-scroll-up",
         ActionId::PreviewScrollDown => "preview-scroll-down",
+        ActionId::Activate => "activate",
+        ActionId::ActivateAlt => "activate-alt",
     }
 }
 
