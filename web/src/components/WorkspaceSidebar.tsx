@@ -431,7 +431,13 @@ export function WorkspaceSidebar(props: Props) {
           {!hasResults && hasFilter && (
             <div className="px-4 py-8 text-center">
               <p className="text-sm text-text-muted">
-                {activeFilterQuery.trim() ? <>No matches for &ldquo;{activeFilterQuery}&rdquo;</> : "Nothing needs you"}
+                {activeFilterQuery.trim() ? (
+                  <>No matches for &ldquo;{activeFilterQuery}&rdquo;</>
+                ) : activeNeedsYou ? (
+                  "Nothing needs you"
+                ) : (
+                  "No matching sessions"
+                )}
               </p>
             </div>
           )}
