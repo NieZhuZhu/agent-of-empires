@@ -3377,6 +3377,7 @@ impl HomeView {
                     | ActionId::JumpNextFinished
                     | ActionId::TogglePreviewInfo
                     | ActionId::ToggleHideStopped
+                    | ActionId::ToggleNeedsYou
                     | ActionId::ToggleDiagnostics
                     | ActionId::OpenSystemHealth
                     | ActionId::SortPicker
