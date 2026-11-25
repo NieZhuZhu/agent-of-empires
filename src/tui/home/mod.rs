@@ -294,6 +294,8 @@ pub struct HomeView {
     repository_order: Vec<String>,
     /// The Daemon's grouping and sort as of the last applied snapshot.
     observed_sidebar_view: Option<crate::session::config::SidebarView>,
+    /// A move under Name wrote the order on screen; the sort becomes Custom once it commits.
+    custom_after_ordering: bool,
     session_feed_reload_retry_at: Option<std::time::Instant>,
     session_feed_failed_cursor: Option<crate::daemon::RuntimeCursor>,
     canonical_metadata_lag: Option<CanonicalMetadataLagState>,
