@@ -2707,7 +2707,6 @@ function AppContent({
                 sort={sidebar.sort}
                 onGroupByChange={sidebar.selectGroupBy}
                 onSortChange={sidebar.selectSort}
-                onResetCustomOrder={sidebar.resetCustomOrder}
                 groups={sidebar.groups}
                 nestedGroups={sidebar.nestedGroups}
                 trashedWorkspaces={trashedWorkspaces}
